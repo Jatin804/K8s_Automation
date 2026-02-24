@@ -1,0 +1,167 @@
+
+- name: Update apt cache
+  apt:
+    update_cache: yes
+
+- name: Disabling Swap first
+  command: swapoff -a
+  when: ansible_swaptotal_mb > 0
+
+- name: Removing swap entry from fstab (Permanent Disable)
+  mount:
+    name: "none"
+    fstype: swap
+    state: absent     
+
+- name: Adding kernal parameters
+  ansible.builtin.command: modprobe overlay && modprobe br_netfilter
+
+- name: Creating k8s.conf
+  ansible.builtin.copy:
+    dest: "/etc/modules-load.d/k8s.conf"
+    content: | 
+      overlay
+      br_netfilter
+    mode: '0644'
+
+- name: Configuring critical kernal parameters
+  ansible.builtin.copy: 
+    dest: "/etc/sysctl.d/k8s.conf"
+    content: |
+      net.bridge.bridge-nf-call-iptables = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.ipv4.ip_forward = 1
+    mode: '0644'
+
+
+- name: Install necessary modules
+  ansible.builtin.apt:
+    name:
+      - curl 
+      - gnupg2
+      - software-properties-common
+      - apt-transport-https
+      - ca-certificates
+      - lsb-release
+
+- name: firewalld service
+  block:
+    - name: Installing firewalld
+      ansible.builtin.apt:
+        - firewalld
+    
+    - name: Enabling firewalld
+      ansible.builtin.systemd_service:
+        name: firewalld
+        state: started
+        enabled: yes
+
+
+- name: Configuring container 1.0
+  block:
+    - name: Create keyring directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Adding repo keys
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: '0644'
+
+    - name: Adding docker repo
+      ansible.builtin.apt_repository:
+        repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+
+    - name: Install Docker
+      ansible.builtin.apt:
+        name: containerd
+        state: latest
+
+- name: Configure Container 2.0
+  block:
+    - name: Ensure containerd config directory exists
+      ansible.builtin.file:
+        path: /etc/containerd
+        state: directory
+        mode: '0755'
+
+    - name: Generate default containerd config
+      ansible.builtin.command:
+        cmd: containerd config default
+      register: containerd_default
+      changed_when: false
+
+    - name: Write containerd config file
+      ansible.builtin.copy:
+        dest: /etc/containerd/config.toml
+        content: "{{ containerd_default.stdout }}"
+        mode: '0644'
+
+    - name: Enable SystemdCgroup
+      ansible.builtin.replace:
+        path: /etc/containerd/config.toml
+        regexp: 'SystemdCgroup = false'
+        replace: 'SystemdCgroup = true'
+
+    - name: Restart containerd
+      ansible.builtin.systemd_service:
+        name: containerd
+        state: restarted
+        enabled: yes
+
+
+- name: Configuring Kubernetes modules
+  block:
+    - name: Ensure keyrings directory exists
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Download Kubernetes GPG key
+      ansible.builtin.get_url:
+        url: https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key
+        dest: /tmp/kubernetes-release.key
+        mode: '0644'
+
+    - name: Dearmor GPG key and save to keyring
+      ansible.builtin.shell: gpg --dearmor < /tmp/kubernetes-release.key > /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      args:
+        creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+    - name: Add Kubernetes APT repository
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /"
+        state: present
+        filename: kubernetes
+        update_cache: yes
+
+    - name: Installing kubernetes modules
+      ansible.builtin.apt:
+        name:
+          - kubelet
+          - kubectl
+          - kubeadm
+        state: present 
+
+    - name: Kubernetes modules hold
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - kubeadm
+        - kubelet
+        - kubectl
+    
+    - name: Enable and start kubelet
+      ansible.builtin.systemd_service:
+        name: kubelet
+        state: started
+        enabled: yes
+
+      
+    

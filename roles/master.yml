@@ -1,0 +1,25 @@
+
+- name: Insuring .kube exists
+  ansible.builtin.file:
+    path: $HOME/.kube
+    state: directory
+    owner: '{{ ansible_user }}'
+    group: '{{ ansible_user }}'
+    mode: '0644'
+
+- name: Copying admin conf to user conf 
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: $HOME/.kube/config
+    remote_src: yes
+    owner: '{{ ansible_user }}'
+    group: '{{ ansible_user }}'
+    mode: '0755'
+
+- name: Running calico.yaml 
+  ansible.builtin.command:
+    - kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/master/manifests/calico.yaml
+
+- name: Fetching SSH key for workers
+  ansible.builtin.command:
+    - kubeadm token create --print-join-command > $HOME/k8s_key.txt
