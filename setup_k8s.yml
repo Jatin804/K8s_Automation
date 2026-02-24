@@ -1,18 +1,18 @@
 ---
-# - hosts: all
-#   become: yes
-#   tasks:
+- hosts: all
+  become: yes
+  tasks:
   
-#     - name: Configure /etc/hosts file
-#       blockinfile:
-#         path: /etc/hosts
-#         block: |
-#           127.0.0.1    localhost localhost.localdomain localhost4 localhost4.localdomain4
-#           ::1          localhost localhost.localdomain localhost6 localhost6.localdomain6
-#           192.168.134.134 k8master.example.com k8master
+    - name: Configure /etc/hosts file
+      blockinfile:
+        path: /etc/hosts
+        block: |
+          127.0.0.1    localhost localhost.localdomain localhost4 localhost4.localdomain4
+          ::1          localhost localhost.localdomain localhost6 localhost6.localdomain6
+          192.168.134.134 k8master.example.com k8master
 
-#     - name: Run common configuration tasks
-#       import_tasks: roles/common.yml
+    - name: Run common configuration tasks
+      import_tasks: roles/common.yml
 
 - hosts: master
   become: yes
@@ -20,13 +20,11 @@
     - name: Running master configration
       import_tasks: roles/master.yml
 
-# - hosts: worker
-#   become: yes
-#   tasks:
-#     - name: Running worker configration
-#       import_tasks: roles/worker.yml
+- hosts: worker
+  become: yes
+  vars: 
+    file_key_value={{ lookup('', './my_local_file.txt') }}
 
-# - hosts: workers
-#   become: yes
-#   tasks:
-#     - import_tasks: roles/worker.yml
+  tasks:
+    - name: Running worker configration
+      import_tasks: roles/worker.yml

@@ -20,6 +20,14 @@
   ansible.builtin.command:
     - kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/master/manifests/calico.yaml
 
-- name: Fetching SSH key for workers
-  ansible.builtin.command:
-    - kubeadm token create --print-join-command > $HOME/k8s_key.txt
+- name: Generate join command
+  ansible.builtin.command: kubeadm token create --print-join-command
+  register: join_command_raw
+
+- name: Set join command as a fact for all hosts
+  ansible.builtin.set_fact:
+    kubernetes_join_command: "{{ join_command_raw.stdout }}"
+  delegate_to: "{{ item }}"
+  delegate_facts: true
+  loop: "{{ groups['all'] }}"
+
