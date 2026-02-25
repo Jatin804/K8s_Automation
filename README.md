@@ -45,7 +45,7 @@ Transfer ssh key to virtual machines.
 ssh-copy-id user@hostname_or_ip           - eg. master@192.168.x.x
 ```
 
-**Test Connection: Run ansible all -m ping -i inventory.ini. If you see "pong," your devices are reachable.**
+**Test Connection: Run ```ansible all -m ping -i inventory.ini```. If you see "pong," your devices are reachable.**
 
 ## D. Executing the Playbook
 Run the main orchestrator file, ```setup_k8s.yml```.
