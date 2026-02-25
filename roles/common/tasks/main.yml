@@ -1,0 +1,170 @@
+---
+# Common installation
+- name: Update apt cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Setting up password auth
+  copy:
+    content: "{{ ansible_user }} ALL=(ALL) NOPASSWD:ALL"
+    dest: "/etc/sudoers.d/{{ ansible_user }}"
+    mode: '0440'
+    validate: '/usr/sbin/visudo -cf %s'
+
+- name: Updating /etc/hosts for connection
+  blockinfile:
+    path: /etc/hosts
+    block: |
+      {% for host in groups['all'] %}
+      {{ hostvars[host]['ansible_host'] }} {{ host }}.example.com {{ host }}
+      {% endfor %}
+    state: present
+    marker: "# {mark} ANSIBLE MANAGED HOSTS"
+
+
+# Disabling swap of all nodes including master 
+- name: Disabling swap immediately
+  command: swapoff -a
+  when: ansible_swaptotal_mb > 0
+
+- name: Disabling swap permanently in fstab
+  replace:
+    path: /etc/fstab
+    regexp: '^([^#].*?\sswap\s+.*)$'
+    replace: '# \1'
+
+
+# Adding kernal modules 
+- name: Loading kernel modules
+  modprobe:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - overlay
+    - br_netfilter
+
+- name: Ensuring kernel modules load on boot
+  copy:
+    dest: /etc/modules-load.d/k8s.conf
+    content: |
+      overlay
+      br_netfilter
+
+- name: Seting up sysctl parameters
+  sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    state: present
+    sysctl_file: /etc/sysctl.d/k8s.conf
+    reload: yes
+  loop:
+    - { name: 'net.bridge.bridge-nf-call-iptables', value: '1' }
+    - { name: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
+    - { name: 'net.ipv4.ip_forward', value: '1' }
+
+
+# Installing neccessory dependencies and network modules for ubuntu
+- name: Installing dependencies
+  apt:
+    name: [curl, gnupg2, software-properties-common, ca-certificates, lsb-release, firewalld]
+    state: present
+    update_cache: yes
+
+- name: Installing mandatory networking packages
+  apt:
+    name: [conntrack, socat, ipset]
+    state: present
+    update_cache: yes
+
+
+# Adding Docker and installing Docker
+- name: Containerd Setup (Docker Repo)
+  block:
+    - name: Create keyring directory
+      file: { path: /etc/apt/keyrings, state: directory, mode: '0755' }
+
+    - name: Adding Docker GPG key
+      get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.asc
+
+    - name: Adding Docker repo
+      apt_repository:
+        repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+
+    - name: Install containerd.io
+      apt: { name: containerd.io, state: present, update_cache: yes }
+
+- name: Generating clean containerd config
+  shell: |
+    mkdir -p /etc/containerd
+    containerd config default > /etc/containerd/config.toml
+    sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml
+  notify: Restart containerd
+
+- name: Force restart containerd to apply CRI changes
+  systemd:
+    name: containerd
+    state: restarted
+    enabled: yes
+    daemon_reload: yes
+
+
+# Kubernetes Setup 
+- name: Removing conflicting kubernetes list files
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/kubernetes.list
+    - /etc/apt/sources.list.d/archive_uri-https_pkgs_k8s_io_core_stable_v1_31_deb_.list
+
+- name: Removing old keyring files to prevent mismatch
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/keyrings/kubernetes.gpg
+    - /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+
+- name: Downloading K8s GPG key
+  get_url:
+    url: https://pkgs.k8s.io/core:/stable:/v1.34/deb/Release.key
+    dest: /etc/apt/keyrings/kubernetes-apt-keyring.asc
+    mode: '0644'
+
+- name: Adding Kubernetes repository
+  apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc] https://pkgs.k8s.io/core:/stable:/v1.34/deb/ /"
+    filename: kubernetes
+    state: present
+    update_cache: yes
+
+
+- name: Adding Kubernetes GPG key
+  get_url:
+    url: https://pkgs.k8s.io/core:/stable:/v1.34/deb/Release.key
+    dest: /etc/apt/keyrings/kubernetes-apt-keyring.asc
+    mode: '0644'
+
+- name: Adding Kubernetes repository
+  apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc] https://pkgs.k8s.io/core:/stable:/v1.34/deb/ /"
+    filename: kubernetes
+    state: present
+    update_cache: yes
+
+- name: Installing K8s components
+  apt:
+    name: [kubelet, kubeadm, kubectl]
+    state: present
+    update_cache: yes
+
+- name: Preventing K8s packages from being upgraded
+  dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: [kubelet, kubeadm, kubectl]

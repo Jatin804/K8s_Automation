@@ -1,0 +1,66 @@
+---
+# Firewall for ports !
+- name: Ensuring firewalld is running
+  systemd:
+    name: firewalld
+    state: started
+    enabled: yes
+
+- name: Adding Ports
+  ansible.posix.firewalld:
+    port: "{{ item }}"
+    permanent: true
+    state: enabled
+    immediate: yes
+  loop:
+    - 6443/tcp
+    - 2379-2380/tcp
+    - 10250-10252/tcp
+    - 10257/tcp
+    - 10259/tcp
+    - 179/tcp
+    - 4789/udp
+  
+- name: Reload firewalld to apply permanent rules
+  service:
+    name: firewalld
+    state: reloaded
+
+# Initializing kubernetes !
+- name: Initializing Kubernetes control plane
+  command: kubeadm init --pod-network-cidr={{ pod_network_cidr }}
+  args:
+    creates: /etc/kubernetes/admin.conf
+  register: kubeadm_init
+
+- name: Creating .kube directory for root
+  file:
+    path: /root/.kube
+    state: directory
+    mode: '0755'
+
+- name: Configuring kubectl for root
+  copy:
+    src: /etc/kubernetes/admin.conf
+    dest: /root/.kube/config
+    remote_src: yes
+
+# Calico Setup
+- name: Installing Calico CNI
+  command: kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.27.2/manifests/calico.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  when: kubeadm_init is changed
+
+# Key for connection
+- name: Generating join command
+  command: kubeadm token create --print-join-command
+  register: join_command_raw
+  changed_when: false
+
+- name: Setting join command globally
+  set_fact:
+    k8s_join_command: "{{ join_command_raw.stdout }}"
+  delegate_to: "{{ item }}"
+  delegate_facts: true
+  with_items: "{{ groups['all'] }}"
