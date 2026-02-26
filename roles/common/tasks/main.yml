@@ -1,6 +1,6 @@
 ---
 # Common installation
-- name: Update apt cache
+- name: Updating apt cache
   apt:
     update_cache: yes
     cache_valid_time: 3600

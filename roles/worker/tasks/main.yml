@@ -18,26 +18,26 @@
     - 30000-32767/tcp
     - 4789/udp
     
-- name: Reload firewalld to apply permanent rules
+- name: Reloading firewalld to apply permanent rules
   service:
     name: firewalld
     state: reloaded
 
 # installinf networking packages 
-- name: Install mandatory networking packages
+- name: Installing mandatory networking packages
   apt:
     name: [conntrack, socat, ipset]
     state: present
     update_cache: yes
 
 # setting up containerd and K8s
-- name: Reset containerd to K8s-compatible settings
+- name: Reseting containerd to K8s-compatible settings
   shell: |
     mkdir -p /etc/containerd
     containerd config default > /etc/containerd/config.toml
     sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml
 
-- name: Apply containerd changes immediately
+- name: Applying containerd changes immediately
   systemd:
     name: containerd
     state: restarted
@@ -45,12 +45,12 @@
 
 
 # Joining key for connecting workers nodes to master
-- name: Check if node is already joined
+- name: Checking if node is already joined
   stat:
     path: /etc/kubernetes/kubelet.conf
   register: kubelet_conf
 
-- name: Join worker to cluster
+- name: Joining worker to cluster
   command: >
     {{ hostvars[groups['masters'][0]].k8s_join_command }}
     --cri-socket unix:///var/run/containerd/containerd.sock

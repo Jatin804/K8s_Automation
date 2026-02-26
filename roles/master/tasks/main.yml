@@ -64,3 +64,10 @@
   delegate_to: "{{ item }}"
   delegate_facts: true
   with_items: "{{ groups['all'] }}"
+
+- name: Saving toker for future worker nodes
+  copy:
+    content: "{{ join_command_raw.stdout }}"
+    dest: "./k8s_join_command.txt"
+  delegate_to: localhost
+  run_once: true
